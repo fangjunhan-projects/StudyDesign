@@ -75,6 +75,7 @@ mod_ia_boundary_ui <- function(id) {
 
       hr(),
       h5("Futility Boundary"),
+      helpText("Futility bounds require an alpha spending function (Lan-DeMets, Kim-DeMets, HSD, User-defined, or No Early Efficacy). Classic designs (O\u2019Brien-Fleming, Pocock, Wang-Tsiatis) do not support beta spending in rpact."),
       selectInput(
         ns("beta_spending"), "Beta Spending Function (Futility)",
         choices = c(
@@ -237,7 +238,17 @@ mod_ia_boundary_server <- function(id) {
       }
 
       # Beta spending (futility)
-      if (input$beta_spending != "none") {
+      # Classic bound designs (OF, P, WT) do not support typeBetaSpending in rpact —
+      # only alpha spending designs (asOF, asP, asKD, asHSD, asUser, noEarlyEfficacy) do.
+      classic_designs <- c("OF", "P", "WT")
+      if (input$beta_spending != "none" && input$alpha_spending %in% classic_designs) {
+        showNotification(
+          paste0("Classic bound designs (O\u2019Brien-Fleming, Pocock, Wang-Tsiatis) do not support ",
+                 "beta spending in rpact. Switch the Alpha Spending Function to a Lan-DeMets or ",
+                 "other spending-based design to enable futility bounds."),
+          type = "warning", duration = 12
+        )
+      } else if (input$beta_spending != "none") {
         args$typeBetaSpending <- input$beta_spending
         args$bindingFutility  <- input$binding_futility
 
@@ -310,7 +321,11 @@ mod_ia_boundary_server <- function(id) {
       design <- res$design
       k <- input$n_stages
 
-      if (input$beta_spending == "none" || is.null(design$futilityBounds)) {
+      has_real_futility <- !is.null(design$futilityBounds) &&
+                           !all(design$futilityBounds <= -5) &&
+                           input$beta_spending != "none" &&
+                           !(input$alpha_spending %in% c("OF", "P", "WT"))
+      if (!has_real_futility) {
         df <- data.frame(Note = "No futility boundaries (beta spending set to 'None')",
                          stringsAsFactors = FALSE)
         return(DT::datatable(df, rownames = FALSE, options = list(dom = "t")))
@@ -348,7 +363,9 @@ mod_ia_boundary_server <- function(id) {
       eff_hr <- ss$criticalValuesEffectScale
       eff_p  <- ss$criticalValuesPValueScale
 
-      has_futility <- !is.null(ss$futilityBoundsEffectScale) && input$beta_spending != "none"
+      has_futility <- !is.null(ss$futilityBoundsEffectScale) &&
+                      input$beta_spending != "none" &&
+                      !(input$alpha_spending %in% c("OF", "P", "WT"))
       fut_hr <- if (has_futility) c(ss$futilityBoundsEffectScale, NA) else rep(NA, k)
       fut_p  <- if (has_futility) c(ss$futilityBoundsPValueScale, NA) else rep(NA, k)
 
@@ -379,7 +396,11 @@ mod_ia_boundary_server <- function(id) {
 
       efficacy <- round(design$criticalValues, 6)
 
-      futility <- if (!is.null(design$futilityBounds) && input$beta_spending != "none") {
+      has_real_futility_combined <- !is.null(design$futilityBounds) &&
+                                    !all(design$futilityBounds <= -5) &&
+                                    input$beta_spending != "none" &&
+                                    !(input$alpha_spending %in% c("OF", "P", "WT"))
+      futility <- if (has_real_futility_combined) {
         c(round(design$futilityBounds, 6), NA)
       } else {
         rep(NA, k)

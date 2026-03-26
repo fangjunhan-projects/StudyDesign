@@ -366,7 +366,15 @@ mod_sample_size_server <- function(id) {
         design_args$userAlphaSpending <- ua
       }
 
-      if (input$ph_beta_spending != "none") {
+      classic_designs <- c("OF", "P", "WT")
+      if (input$ph_beta_spending != "none" && input$ph_alpha_spending %in% classic_designs) {
+        showNotification(
+          paste0("Classic bound designs (O\u2019Brien-Fleming, Pocock, Wang-Tsiatis) do not support ",
+                 "beta spending in rpact. Switch the Alpha Spending Function to a spending-based ",
+                 "design (e.g., Lan-DeMets) to enable futility bounds."),
+          type = "warning", duration = 12
+        )
+      } else if (input$ph_beta_spending != "none") {
         design_args$typeBetaSpending <- input$ph_beta_spending
         design_args$bindingFutility  <- input$ph_binding_futility
         if (input$ph_beta_spending == "bsKD")
@@ -493,7 +501,11 @@ mod_sample_size_server <- function(id) {
       design <- res$design
       k      <- res$k
 
-      fut <- if (!is.null(design$futilityBounds) && input$ph_beta_spending != "none") {
+      has_real_fut <- !is.null(design$futilityBounds) &&
+                      !all(design$futilityBounds <= -5) &&
+                      input$ph_beta_spending != "none" &&
+                      !(input$ph_alpha_spending %in% c("OF", "P", "WT"))
+      fut <- if (has_real_fut) {
         c(round(design$futilityBounds, 6), NA)
       } else rep(NA_real_, k)
 
@@ -527,7 +539,9 @@ mod_sample_size_server <- function(id) {
       eff_hr <- round(ss$criticalValuesEffectScale, 6)
       eff_p  <- format(ss$criticalValuesPValueScale, digits = 4, scientific = TRUE)
 
-      has_fut <- !is.null(ss$futilityBoundsEffectScale) && input$ph_beta_spending != "none"
+      has_fut <- !is.null(ss$futilityBoundsEffectScale) &&
+                 input$ph_beta_spending != "none" &&
+                 !(input$ph_alpha_spending %in% c("OF", "P", "WT"))
       fut_hr  <- if (has_fut) c(round(ss$futilityBoundsEffectScale, 6), NA) else rep(NA_real_, k)
       fut_p   <- if (has_fut) c(format(ss$futilityBoundsPValueScale, digits = 4, scientific = TRUE), NA) else rep(NA_character_, k)
 
