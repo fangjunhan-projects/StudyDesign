@@ -1,13 +1,16 @@
 Package: BiostatVD
 Title: Biostatistics Validation Dashboard
-Version: 0.1.0
-Description: R Shiny application for automated validation of efficacy results
-    in clinical trials. Supports IA boundary re-calculation, PFS efficacy
-    validation via raw CRF/SDTM data paths, and ADaM dataset comparison.
+Version: 0.2.0
+Description: R Shiny application for clinical trial study design calculations
+    and validation. Supports group sequential IA boundary re-calculation
+    (rpact), sample size planning under proportional hazards (rpact), and
+    sample size planning under non-proportional hazards with delayed treatment
+    effect (gsDesign2). Features flexible alpha/beta spending functions,
+    fixed boundaries (gs_b), and per-stage test_upper control.
 Authors@R: person("BiostatVD", "Team", role = c("aut", "cre"))
 License: MIT
 Depends:
-    R (>= 4.1.0)
+    R (>= 4.4.0)
 Imports:
     shiny,
     shinydashboard,
@@ -18,7 +21,9 @@ Imports:
     DT,
     ggplot2,
     plotly,
-    rmarkdown
+    scales,
+    gsDesign2,
+    gsDesign
 Suggests:
     testthat (>= 3.0.0)
 Encoding: UTF-8

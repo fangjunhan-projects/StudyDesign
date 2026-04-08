@@ -8,8 +8,8 @@ library(DT)
 library(ggplot2)
 library(plotly)
 
-# M4: Event Projection dependencies (loaded lazily inside the module if available)
-# install.packages(c("eventTrack", "fitdistrplus"))
+# M1b NPH dependencies (gsDesign2 + gsDesign for spending functions)
+# install.packages(c("gsDesign2", "gsDesign", "scales"))
 
 source("R/utils_data.R")
 source("R/utils_compare.R")

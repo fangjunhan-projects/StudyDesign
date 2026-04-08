@@ -7,19 +7,23 @@ R Shiny application for study design calculations including IA boundary re-calcu
 | Module | Sub-modules | Description |
 |--------|-------------|-------------|
 | M1: Study Design Calculation | IA Boundary | Re-calculate group sequential boundaries using rpact; supports multiple alpha/beta spending functions and HR-scale boundary output |
-| | Sample Size | Sample size calculation for PH models (rpact); NPH models via gsDesign2 (coming soon) |
+| | Sample Size (PH) | Sample size for PH survival models (rpact); group sequential with spending functions, HR-scale boundaries |
+| | Sample Size (NPH) | Sample size for NPH survival models (gsDesign2); delayed treatment effect implemented; group sequential supported |
 
 ## Requirements
 
 - R >= 4.1.0
-- Core packages: `shiny`, `shinydashboard`, `rpact`, `DT`, `ggplot2`, `plotly`
-- Sample Size NPH (coming soon): `gsDesign2`
+- Core packages: `shiny`, `shinydashboard`, `rpact`, `DT`, `ggplot2`, `plotly`, `scales`
+- Sample Size NPH: `gsDesign2`, `gsDesign`
 
 ## Quick Start
 
 ```r
 # Install core dependencies
-install.packages(c("shiny", "shinydashboard", "rpact", "DT", "ggplot2", "plotly"))
+install.packages(c("shiny", "shinydashboard", "rpact", "DT", "ggplot2", "plotly", "scales"))
+
+# Install NPH dependencies
+install.packages(c("gsDesign2", "gsDesign"))
 
 # Run the app
 shiny::runApp()
