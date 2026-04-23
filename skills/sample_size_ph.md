@@ -8,6 +8,26 @@ Calculate the required sample size and event count for a survival endpoint clini
 
 ---
 
+## Execution
+
+This skill requires R. How to proceed depends on the agent's capabilities:
+
+**If the agent can execute R code (e.g. has a shell/code tool):**
+Read the inputs from the user's prompt, substitute them into the R code in the Procedure section, run it, and return the formatted results directly.
+
+**If the agent cannot execute R code (e.g. ChatGPT, Gemini without code tools):**
+Read the inputs from the user's prompt, substitute them into the R code in the Procedure section, and present the complete ready-to-run R script to the user. Ask the user to run it in their R console and share the output.
+
+**If the agent has no code capability at all:**
+Walk the user through each step of the Procedure section in plain language, explaining what each function does and what output to expect.
+
+### Requirements
+- **R version:** ≥ 4.1.0
+- **R packages:** `rpact`
+- **Install:** `install.packages("rpact")`
+
+---
+
 ## Inputs
 
 ### Trial Design
