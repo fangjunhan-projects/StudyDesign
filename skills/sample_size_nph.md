@@ -200,6 +200,14 @@ result <- gsDesign2::gs_design_ahr(
 )
 ```
 
+### Step 6 — Save the executed script
+
+After obtaining results, save the **complete R script you ran** (Steps 1–5 with all actual input values substituted) to a `.R` file. This file serves as an audit record of exactly what was executed.
+
+- Suggested filename: `nph_sample_size_<study_name>_<YYYYMMDD>.R`
+- Content: the full script exactly as run — not a template, but the actual code with real values
+- Include a comment header with the date, analyst name, and study/context
+
 ---
 
 ## Output
@@ -247,6 +255,60 @@ result <- gsDesign2::gs_design_ahr(
 - `hr_early` is typically 1.0 (no effect during delay); must be > 0
 - `hr_late` must be < 1 for a beneficial treatment effect
 - `test_upper` must be a logical vector of length K
+
+---
+
+## Unit Testing
+
+After running the design, verify key outputs against expected values using the following checks. Apply these whenever re-running the same set of inputs to confirm reproducibility.
+
+```r
+# --- Tolerance thresholds ---
+tol_n    <- 2      # acceptable rounding difference for N and events
+tol_z    <- 0.01   # acceptable difference for z-scores
+tol_ahr  <- 0.005  # acceptable difference for AHR
+tol_info <- 0.005  # acceptable difference for info fraction
+
+# --- Helper ---
+pass <- TRUE
+check <- function(label, observed, expected, tol) {
+  diff <- abs(observed - expected)
+  ok   <- diff <= tol
+  if (!ok) pass <<- FALSE
+  cat(sprintf("[%s] %-30s observed=%.4f  expected=%.4f  diff=%.4f\n",
+              if (ok) "PASS" else "FAIL", label, observed, expected, diff))
+}
+
+# --- Key metrics ---
+total_n  <- ceiling(max(result$analysis$n))
+tot_ev   <- ceiling(max(result$analysis$event))
+duration <- round(max(result$analysis$time), 1)
+
+check("Total N",         total_n,  <expected_total_n>,  tol_n)
+check("Required events", tot_ev,   <expected_events>,   tol_n)
+check("Study duration",  duration, <expected_duration>, 0.1)
+
+# --- Per-stage analysis ---
+an <- result$analysis
+for (i in seq_len(k)) {
+  check(paste("Stage", i, "events"),   ceiling(an$event[i]),  <expected_events_stage_i>,   tol_n)
+  check(paste("Stage", i, "AHR"),      an$ahr[i],             <expected_ahr_stage_i>,      tol_ahr)
+  check(paste("Stage", i, "info_frac"), an$info_frac[i],      <expected_info_frac_stage_i>, tol_info)
+}
+
+# --- Boundary z-scores ---
+bd    <- result$bound
+upper <- bd[bd$bound == "upper", "z"]
+lower <- bd[bd$bound == "lower", "z"]
+for (i in seq_len(k)) {
+  check(paste("Stage", i, "upper z"), upper[i], <expected_upper_z_i>, tol_z)
+  check(paste("Stage", i, "lower z"), lower[i], <expected_lower_z_i>, tol_z)
+}
+
+if (pass) cat("\n=== ALL TESTS PASSED ===\n") else cat("\n!!! SOME TESTS FAILED !!!\n")
+```
+
+Replace all `<expected_...>` placeholders with the values from your verified reference run. The unit test code should also be included in the saved `.R` script (Step 6).
 
 ---
 

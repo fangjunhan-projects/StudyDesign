@@ -179,6 +179,14 @@ ss <- do.call(rpact::getSampleSizeSurvival, ss_args)
 info_fractions <- planned_events / planned_events[k]
 ```
 
+### Step 4 — Save the executed script
+
+After obtaining results, save the **complete R script you ran** (Steps 1–3 with all actual input values substituted) to a `.R` file. This file serves as an audit record of exactly what was executed.
+
+- Suggested filename: `ph_sample_size_<study_name>_<YYYYMMDD>.R`
+- Content: the full script exactly as run — not a template, but the actual code with real values
+- Include a comment header with the date, analyst name, and study/context
+
 ---
 
 ## Output
@@ -233,6 +241,55 @@ info_fractions <- planned_events / planned_events[k]
 - Futility bounds are real only when: `!is.null(design$futilityBounds) && !all(design$futilityBounds <= -5) && beta_spending != "none"`
 - `user_alpha_spending`: non-decreasing, last value = `alpha`
 - `user_beta_spending`: non-decreasing, last value = `beta`
+
+---
+
+## Unit Testing
+
+After running the design, verify key outputs against expected values using the following checks.
+
+```r
+# --- Tolerance thresholds ---
+tol_n <- 2      # acceptable rounding difference for N and events
+tol_z <- 0.01   # acceptable difference for z-scores
+
+# --- Helper ---
+pass <- TRUE
+check <- function(label, observed, expected, tol) {
+  diff <- abs(observed - expected)
+  ok   <- diff <= tol
+  if (!ok) pass <<- FALSE
+  cat(sprintf("[%s] %-35s observed=%.4f  expected=%.4f  diff=%.4f\n",
+              if (ok) "PASS" else "FAIL", label, observed, expected, diff))
+}
+
+# --- Key metrics ---
+total_n  <- ceiling(max(ss$numberOfSubjects))
+tot_ev   <- ceiling(ss$maxNumberOfEvents)
+duration <- round(ss$studyDuration, 1)
+
+check("Total N",          total_n,  <expected_total_n>,  tol_n)
+check("Required events",  tot_ev,   <expected_events>,   tol_n)
+check("Study duration",   duration, <expected_duration>, 0.1)
+
+# --- Per-stage boundaries ---
+for (i in seq_len(k)) {
+  check(paste("Stage", i, "efficacy z"),
+        round(design$criticalValues[i], 4), <expected_efficacy_z_i>, tol_z)
+}
+
+# --- Futility bounds (if applicable) ---
+if (!is.null(design$futilityBounds) && !all(design$futilityBounds <= -5)) {
+  for (i in seq_len(k - 1)) {
+    check(paste("Stage", i, "futility z"),
+          round(design$futilityBounds[i], 4), <expected_futility_z_i>, tol_z)
+  }
+}
+
+if (pass) cat("\n=== ALL TESTS PASSED ===\n") else cat("\n!!! SOME TESTS FAILED !!!\n")
+```
+
+Replace all `<expected_...>` placeholders with values from your verified reference run. The unit test code should also be included in the saved `.R` script (Step 4).
 
 ---
 
