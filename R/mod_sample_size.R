@@ -159,8 +159,23 @@ mod_sample_size_ui <- function(id) {
 
                 # ---- Accrual & Follow-up ----
                 h5("Accrual & Follow-up"),
-                numericInput(ns("ph_accrual_time"),  "Accrual Duration (months)",                   value = 24,   min = 1),
-                numericInput(ns("ph_accrual_rate"),  "Accrual Rate (patients / month)",             value = 20,   min = 0.1, step = 1),
+                radioButtons(ns("ph_accrual_method"), "Accrual Input Method",
+                             choices = c("Constant rate"             = "constant",
+                                         "Monthly enrollment counts" = "monthly"),
+                             selected = "constant", inline = TRUE),
+                conditionalPanel(
+                  condition = sprintf("input['%s'] == 'constant'", ns("ph_accrual_method")),
+                  numericInput(ns("ph_accrual_time"), "Accrual Duration (months)",       value = 24,  min = 1),
+                  numericInput(ns("ph_accrual_rate"), "Accrual Rate (patients / month)", value = 20,  min = 0.1, step = 1)
+                ),
+                conditionalPanel(
+                  condition = sprintf("input['%s'] == 'monthly'", ns("ph_accrual_method")),
+                  textInput(ns("ph_monthly_enroll"),
+                            "Monthly Enrollment Counts (comma-separated)",
+                            placeholder = "e.g. 2, 3, 4, 5, 23, 67, 2, 45, 8, 12, 11, 12"),
+                  p("One value per month. Accrual duration = length of this vector.",
+                    style = "font-size: 0.85em; color: #888;")
+                ),
                 numericInput(ns("ph_followup_time"), "Additional Follow-up after Accrual (months)", value = 12,   min = 0),
                 numericInput(ns("ph_dropout1"),      "Annual Dropout Rate — Treatment",             value = 0.02, min = 0, max = 1, step = 0.01),
                 numericInput(ns("ph_dropout2"),      "Annual Dropout Rate — Control",               value = 0.02, min = 0, max = 1, step = 0.01),
@@ -241,8 +256,23 @@ mod_sample_size_ui <- function(id) {
 
                 hr(),
                 h5("Accrual & Follow-up"),
-                numericInput(ns("nph_accrual_time"),  "Accrual Duration (months)",                   value = 24,   min = 1),
-                numericInput(ns("nph_accrual_rate"),  "Accrual Rate (patients / month)",             value = 20,   min = 0.1, step = 1),
+                radioButtons(ns("nph_accrual_method"), "Accrual Input Method",
+                             choices = c("Constant rate"             = "constant",
+                                         "Monthly enrollment counts" = "monthly"),
+                             selected = "constant", inline = TRUE),
+                conditionalPanel(
+                  condition = sprintf("input['%s'] == 'constant'", ns("nph_accrual_method")),
+                  numericInput(ns("nph_accrual_time"), "Accrual Duration (months)",       value = 24,  min = 1),
+                  numericInput(ns("nph_accrual_rate"), "Accrual Rate (patients / month)", value = 20,  min = 0.1, step = 1)
+                ),
+                conditionalPanel(
+                  condition = sprintf("input['%s'] == 'monthly'", ns("nph_accrual_method")),
+                  textInput(ns("nph_monthly_enroll"),
+                            "Monthly Enrollment Counts (comma-separated)",
+                            placeholder = "e.g. 1, 3, 6, 9, 13, 18, 22, 27"),
+                  p("One value per month. Rates are converted to relative proportions (sum to 1) for gsDesign2.",
+                    style = "font-size: 0.85em; color: #888;")
+                ),
                 numericInput(ns("nph_followup_time"), "Additional Follow-up after Accrual (months)", value = 12,   min = 0),
                 numericInput(ns("nph_dropout"),       "Annual Dropout Rate",                         value = 0.02, min = 0, max = 1, step = 0.01),
                 numericInput(ns("nph_med_ctrl"),      "Median Survival — Control (months)",          value = 10,   min = 0.1, step = 0.5),
@@ -435,12 +465,26 @@ mod_sample_size_server <- function(id) {
 
       design <- do.call(rpact::getDesignGroupSequential, design_args)
 
+      # ---- Resolve accrual args ----
+      if (input$ph_accrual_method == "constant") {
+        accrual_time_arg      <- c(0, input$ph_accrual_time)
+        accrual_intensity_arg <- input$ph_accrual_rate
+      } else {
+        req(input$ph_monthly_enroll)
+        monthly <- as.numeric(trimws(strsplit(input$ph_monthly_enroll, ",")[[1]]))
+        validate(need(length(monthly) > 0 && all(!is.na(monthly)) && all(monthly >= 0),
+                      "Monthly enrollment counts must be non-negative numbers."))
+        n_months              <- length(monthly)
+        accrual_time_arg      <- seq(0, n_months - 1)
+        accrual_intensity_arg <- monthly
+      }
+
       # ---- Build sample size / survival args ----
       ss_args <- list(
         design                  = design,
         allocationRatioPlanned  = input$ph_alloc,
-        accrualTime             = c(0, input$ph_accrual_time),
-        accrualIntensity        = input$ph_accrual_rate,
+        accrualTime             = accrual_time_arg,
+        accrualIntensity        = accrual_intensity_arg,
         followUpTime            = input$ph_followup_time,
         dropoutRate1            = input$ph_dropout1,
         dropoutRate2            = input$ph_dropout2,
@@ -662,14 +706,26 @@ mod_sample_size_server <- function(id) {
           cancelOutput = TRUE)
 
       k           <- input$nph_k
-      total_time  <- input$nph_accrual_time + input$nph_followup_time
       ctrl_lambda <- log(2) / input$nph_med_ctrl
 
       # Enrollment rate
-      enroll_rate <- gsDesign2::define_enroll_rate(
-        duration = input$nph_accrual_time,
-        rate     = input$nph_accrual_rate
-      )
+      if (input$nph_accrual_method == "constant") {
+        total_time  <- input$nph_accrual_time + input$nph_followup_time
+        enroll_rate <- gsDesign2::define_enroll_rate(
+          duration = input$nph_accrual_time,
+          rate     = input$nph_accrual_rate
+        )
+      } else {
+        req(input$nph_monthly_enroll)
+        monthly <- as.numeric(trimws(strsplit(input$nph_monthly_enroll, ",")[[1]]))
+        validate(need(length(monthly) > 0 && all(!is.na(monthly)) && all(monthly >= 0),
+                      "Monthly enrollment counts must be non-negative numbers."))
+        total_time  <- length(monthly) + input$nph_followup_time
+        enroll_rate <- gsDesign2::define_enroll_rate(
+          duration = rep(1, length(monthly)),
+          rate     = monthly / sum(monthly)
+        )
+      }
 
       # Failure / dropout rates: piecewise for delayed treatment effect
       fail_rate <- gsDesign2::define_fail_rate(
