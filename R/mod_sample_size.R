@@ -210,7 +210,166 @@ mod_sample_size_ui <- function(id) {
         ),
 
         # ================================================================
-        # Tab 2: Non-Proportional Hazard (gsDesign2) — skeleton
+        # Tab 2: PH — Stratified (rpact, weighted average HR)
+        # ================================================================
+        tabPanel(
+          title = tagList(icon("equals"), " PH — Stratified (rpact)"),
+          value = "ph_strat",
+
+          fluidRow(
+            column(
+              width = 4,
+              box(
+                title = "Design Parameters", status = "primary",
+                solidHeader = TRUE, width = NULL,
+
+                h5("Trial Design"),
+                numericInput(ns("ph_s_k"),     "Number of Stages (K)",          value = 3,     min = 1, max = 10),
+                numericInput(ns("ph_s_alpha"),  "Overall Alpha (one-sided)",     value = 0.025, min = 0.001, max = 0.5, step = 0.005),
+                numericInput(ns("ph_s_beta"),   "Beta (Type II error, 1-power)", value = 0.2,   min = 0.01,  max = 0.5, step = 0.05),
+                selectInput(ns("ph_s_sided"),  "Sidedness",
+                            choices = c("One-sided" = 1, "Two-sided" = 2), selected = 1),
+
+                hr(),
+                h5("Information Fractions"),
+                radioButtons(ns("ph_s_info_method"), "Input Method",
+                             choices = c("Enter fractions directly"          = "fractions",
+                                         "Enter planned events at each look" = "events"),
+                             selected = "fractions", inline = TRUE),
+                conditionalPanel(
+                  condition = sprintf("input['%s'] == 'fractions'", ns("ph_s_info_method")),
+                  textInput(ns("ph_s_info_fractions"), "Fractions (comma-separated)",
+                            value = "0.33, 0.67, 1.0")
+                ),
+                conditionalPanel(
+                  condition = sprintf("input['%s'] == 'events'", ns("ph_s_info_method")),
+                  textInput(ns("ph_s_planned_events"), "Planned events at each look (comma-separated)",
+                            placeholder = "e.g. 100, 200, 300"),
+                  verbatimTextOutput(ns("ph_s_computed_fractions"))
+                ),
+
+                hr(),
+                h5("Interim Analysis Types"),
+                uiOutput(ns("ph_s_ia_type_inputs")),
+
+                hr(),
+                h5("Efficacy Boundary"),
+                selectInput(ns("ph_s_alpha_spending"), "Alpha Spending Function",
+                            choices = c(
+                              "O'Brien-Fleming"              = "OF",
+                              "Pocock"                       = "P",
+                              "Wang-Tsiatis Delta"           = "WT",
+                              "Lan-DeMets (O'Brien-Fleming)" = "asOF",
+                              "Lan-DeMets (Pocock)"          = "asP",
+                              "Kim-DeMets (power)"           = "asKD",
+                              "Hwang-Shih-DeCani"            = "asHSD",
+                              "User-defined"                 = "asUser",
+                              "No early efficacy"            = "noEarlyEfficacy"
+                            ), selected = "OF"),
+                conditionalPanel(
+                  condition = sprintf("input['%s'] == 'asKD'", ns("ph_s_alpha_spending")),
+                  numericInput(ns("ph_s_gamma_a"),     "Gamma (alpha spending)", value = 1,  step = 0.1)
+                ),
+                conditionalPanel(
+                  condition = sprintf("input['%s'] == 'asHSD'", ns("ph_s_alpha_spending")),
+                  numericInput(ns("ph_s_gamma_a_hsd"), "Gamma (alpha HSD)",      value = -4, step = 0.5)
+                ),
+                conditionalPanel(
+                  condition = sprintf("input['%s'] == 'asUser'", ns("ph_s_alpha_spending")),
+                  textInput(ns("ph_s_user_alpha"),
+                            "Cumulative alpha at each look (comma-separated)",
+                            placeholder = "e.g. 0.0001, 0.0062, 0.025")
+                ),
+
+                hr(),
+                h5("Futility Boundary"),
+                selectInput(ns("ph_s_beta_spending"), "Beta Spending Function",
+                            choices = c(
+                              "None (no futility)"   = "none",
+                              "O'Brien-Fleming type" = "bsOF",
+                              "Pocock type"          = "bsP",
+                              "Kim-DeMets (power)"   = "bsKD",
+                              "Hwang-Shih-DeCani"    = "bsHSD",
+                              "User-defined"         = "bsUser"
+                            ), selected = "none"),
+                conditionalPanel(
+                  condition = sprintf("input['%s'] == 'bsKD'", ns("ph_s_beta_spending")),
+                  numericInput(ns("ph_s_gamma_b"),     "Gamma (beta spending)", value = 1,  step = 0.1)
+                ),
+                conditionalPanel(
+                  condition = sprintf("input['%s'] == 'bsHSD'", ns("ph_s_beta_spending")),
+                  numericInput(ns("ph_s_gamma_b_hsd"), "Gamma (beta HSD)",      value = -4, step = 0.5)
+                ),
+                conditionalPanel(
+                  condition = sprintf("input['%s'] == 'bsUser'", ns("ph_s_beta_spending")),
+                  textInput(ns("ph_s_user_beta"),
+                            "Cumulative beta at each look (comma-separated)",
+                            placeholder = "e.g. 0.026, 0.117, 0.200")
+                ),
+                conditionalPanel(
+                  condition = sprintf("input['%s'] != 'none'", ns("ph_s_beta_spending")),
+                  checkboxInput(ns("ph_s_binding_futility"), "Binding Futility", value = FALSE)
+                ),
+
+                hr(),
+                h5("Strata"),
+                numericInput(ns("ph_s_n_strata"), "Number of Strata", value = 2, min = 2, max = 6, step = 1),
+                p("Weighted average HR is computed as exp(Σ prop_i × log(HR_i)).",
+                  style = "font-size: 0.85em; color: #888;"),
+                uiOutput(ns("ph_strat_stratum_inputs")),
+                verbatimTextOutput(ns("ph_s_weighted_hr")),
+
+                hr(),
+                numericInput(ns("ph_s_alloc"), "Allocation Ratio (trt : ctrl)", value = 1, min = 0.1, step = 0.1),
+
+                hr(),
+                h5("Accrual & Follow-up"),
+                radioButtons(ns("ph_s_accrual_method"), "Accrual Input Method",
+                             choices = c("Constant rate"             = "constant",
+                                         "Monthly enrollment counts" = "monthly"),
+                             selected = "constant", inline = TRUE),
+                conditionalPanel(
+                  condition = sprintf("input['%s'] == 'constant'", ns("ph_s_accrual_method")),
+                  numericInput(ns("ph_s_accrual_time"), "Accrual Duration (months)",       value = 24,  min = 1),
+                  numericInput(ns("ph_s_accrual_rate"), "Accrual Rate (patients / month)", value = 20,  min = 0.1, step = 1)
+                ),
+                conditionalPanel(
+                  condition = sprintf("input['%s'] == 'monthly'", ns("ph_s_accrual_method")),
+                  textInput(ns("ph_s_monthly_enroll"),
+                            "Monthly Enrollment Counts (comma-separated)",
+                            placeholder = "e.g. 2, 3, 4, 5, 23, 67, 2, 45, 8, 12, 11, 12")
+                ),
+                numericInput(ns("ph_s_followup_time"), "Additional Follow-up (months)",  value = 12,   min = 0),
+                numericInput(ns("ph_s_dropout1"),      "Annual Dropout — Treatment",     value = 0.02, min = 0, max = 1, step = 0.01),
+                numericInput(ns("ph_s_dropout2"),      "Annual Dropout — Control",       value = 0.02, min = 0, max = 1, step = 0.01),
+                numericInput(ns("ph_s_dropout_time"),  "Dropout Reference Time (months)", value = 12,   min = 1),
+
+                hr(),
+                actionButton(ns("ph_s_run"), "Calculate Sample Size",
+                             class = "btn-primary btn-block", icon = icon("calculator"))
+              )
+            ),
+
+            column(
+              width = 8,
+              uiOutput(ns("ph_s_summary_boxes")),
+              box(
+                title = "Detailed Results", status = "success",
+                solidHeader = TRUE, width = NULL,
+                tabsetPanel(
+                  tabPanel("Stage Details",   DT::dataTableOutput(ns("ph_s_stage_table"))),
+                  tabPanel("Boundaries (z)",  DT::dataTableOutput(ns("ph_s_boundary_table"))),
+                  tabPanel("Boundaries (HR)", DT::dataTableOutput(ns("ph_s_hr_table"))),
+                  tabPanel("Boundary Plot",   plotOutput(ns("ph_s_boundary_plot"), height = "420px")),
+                  tabPanel("Design Details",  verbatimTextOutput(ns("ph_s_design_summary")))
+                )
+              )
+            )
+          )
+        ),
+
+        # ================================================================
+        # Tab 3: Non-Proportional Hazard (gsDesign2) — skeleton
         # ================================================================
         tabPanel(
           title = tagList(icon("chart-line"), " Non-Proportional Hazard (gsDesign2)"),
@@ -744,6 +903,318 @@ mod_sample_size_server <- function(id) {
     output$ph_design_summary <- renderPrint({
       res <- ph_result()
       req(res)
+      cat("========== Group Sequential Design ==========\n\n")
+      print(summary(res$design))
+      cat("\n\n========== Sample Size / Survival ==========\n\n")
+      print(summary(res$ss))
+    })
+
+    # ================================================================
+    # PH Stratified: Dynamic IA type selectors
+    # ================================================================
+    output$ph_s_ia_type_inputs <- renderUI({
+      k <- input$ph_s_k
+      req(k >= 2)
+      n_interim <- k - 1
+      defaults <- if (n_interim == 1) "Both" else if (n_interim == 2) c("Futility","Efficacy") else c("Futility", rep("Both", n_interim - 2), "Efficacy")
+      lapply(seq_len(n_interim), function(i) {
+        selectInput(ns(paste0("ph_s_ia_type_", i)), paste0("IA ", i, " Type"),
+                    choices = c("Futility","Efficacy","Both"),
+                    selected = defaults[min(i, length(defaults))])
+      })
+    })
+
+    # ================================================================
+    # PH Stratified: Computed fractions preview
+    # ================================================================
+    output$ph_s_computed_fractions <- renderText({
+      req(input$ph_s_planned_events)
+      ev <- suppressWarnings(as.numeric(trimws(strsplit(input$ph_s_planned_events, ",")[[1]])))
+      if (any(is.na(ev)) || length(ev) == 0) return("Enter valid event counts")
+      paste0("Computed fractions: ", paste(round(ev / ev[length(ev)], 4), collapse = ", "))
+    })
+
+    # ================================================================
+    # PH Stratified: Dynamic per-stratum inputs
+    # ================================================================
+    output$ph_strat_stratum_inputs <- renderUI({
+      n <- input$ph_s_n_strata
+      req(n >= 2)
+      lapply(seq_len(n), function(i) {
+        tagList(
+          hr(),
+          h6(paste0("Stratum ", i)),
+          textInput(ns(paste0("ph_s_name_", i)), "Stratum Name",           value = paste0("S", i)),
+          numericInput(ns(paste0("ph_s_prop_", i)), "Enrollment Proportion (%)", value = round(100/n, 1), min = 0.1, max = 99.9, step = 0.1),
+          numericInput(ns(paste0("ph_s_hr_",   i)), "Hazard Ratio (trt/ctrl)",   value = 0.65, min = 0.01, step = 0.01)
+        )
+      })
+    })
+
+    # ================================================================
+    # PH Stratified: Weighted average HR display
+    # ================================================================
+    output$ph_s_weighted_hr <- renderText({
+      n <- input$ph_s_n_strata
+      req(n >= 2)
+      props <- sapply(seq_len(n), function(i) input[[paste0("ph_s_prop_", i)]])
+      hrs   <- sapply(seq_len(n), function(i) input[[paste0("ph_s_hr_",   i)]])
+      if (any(is.null(props)) || any(is.null(hrs))) return("")
+      if (any(is.na(props)) || any(is.na(hrs)) || any(hrs <= 0)) return("Check HR values (must be > 0)")
+      rel_props  <- props / sum(props)
+      hr_weighted <- exp(sum(rel_props * log(hrs)))
+      paste0("Weighted average HR: ", round(hr_weighted, 4),
+             "\n(used as hazardRatio in rpact)")
+    })
+
+    # ================================================================
+    # PH Stratified: Info fractions
+    # ================================================================
+    ph_s_info_frac <- reactive({
+      k <- input$ph_s_k
+      req(k)
+      if (input$ph_s_info_method == "fractions") {
+        req(input$ph_s_info_fractions)
+        vals <- as.numeric(trimws(strsplit(input$ph_s_info_fractions, ",")[[1]]))
+        validate(need(length(vals) == k, "Number of fractions must equal K."),
+                 need(all(!is.na(vals)), "All fractions must be numeric."))
+        vals
+      } else {
+        req(input$ph_s_planned_events)
+        ev <- as.numeric(trimws(strsplit(input$ph_s_planned_events, ",")[[1]]))
+        validate(need(length(ev) == k,          "Number of event counts must equal K."),
+                 need(all(!is.na(ev) & ev > 0), "All event counts must be positive."))
+        ev / ev[length(ev)]
+      }
+    })
+
+    # ================================================================
+    # PH Stratified: Main calculation
+    # ================================================================
+    ph_s_result <- eventReactive(input$ph_s_run, {
+
+      n_strata  <- input$ph_s_n_strata
+      k         <- input$ph_s_k
+      info_frac <- ph_s_info_frac()
+
+      props <- sapply(seq_len(n_strata), function(i) input[[paste0("ph_s_prop_", i)]])
+      hrs   <- sapply(seq_len(n_strata), function(i) input[[paste0("ph_s_hr_",   i)]])
+      validate(
+        need(all(!is.na(props)) && all(props > 0), "All enrollment proportions must be positive."),
+        need(all(!is.na(hrs))   && all(hrs > 0),   "All hazard ratios must be positive.")
+      )
+      rel_props   <- props / sum(props)
+      hr_weighted <- exp(sum(rel_props * log(hrs)))
+
+      ia_types <- if (k > 1) sapply(seq_len(k-1), function(i) input[[paste0("ph_s_ia_type_", i)]]) else character(0)
+
+      # Build group sequential design
+      design_args <- list(
+        kMax             = k,
+        alpha            = input$ph_s_alpha,
+        beta             = input$ph_s_beta,
+        sided            = as.numeric(input$ph_s_sided),
+        informationRates = info_frac,
+        typeOfDesign     = input$ph_s_alpha_spending
+      )
+      if (input$ph_s_alpha_spending == "asKD")   design_args$gammaA <- input$ph_s_gamma_a
+      if (input$ph_s_alpha_spending == "asHSD")  design_args$gammaA <- input$ph_s_gamma_a_hsd
+      if (input$ph_s_alpha_spending == "asUser") {
+        req(input$ph_s_user_alpha)
+        ua <- as.numeric(trimws(strsplit(input$ph_s_user_alpha, ",")[[1]]))
+        validate(need(length(ua) == k && all(!is.na(ua)), "Check user alpha spending values."))
+        design_args$userAlphaSpending <- ua
+      }
+      classic_designs <- c("OF","P","WT")
+      if (input$ph_s_beta_spending != "none" && input$ph_s_alpha_spending %in% classic_designs) {
+        showNotification("Classic designs do not support beta spending in rpact.", type = "warning", duration = 8)
+      } else if (input$ph_s_beta_spending != "none") {
+        design_args$typeBetaSpending <- input$ph_s_beta_spending
+        design_args$bindingFutility  <- input$ph_s_binding_futility
+        if (input$ph_s_beta_spending == "bsKD")   design_args$gammaB <- input$ph_s_gamma_b
+        if (input$ph_s_beta_spending == "bsHSD")  design_args$gammaB <- input$ph_s_gamma_b_hsd
+        if (input$ph_s_beta_spending == "bsUser") {
+          req(input$ph_s_user_beta)
+          ub <- as.numeric(trimws(strsplit(input$ph_s_user_beta, ",")[[1]]))
+          validate(need(length(ub) == k && all(!is.na(ub)), "Check user beta spending values."))
+          design_args$userBetaSpending <- ub
+        }
+      }
+      design <- do.call(rpact::getDesignGroupSequential, design_args)
+
+      # Resolve accrual
+      if (input$ph_s_accrual_method == "constant") {
+        accrual_time_arg      <- c(0, input$ph_s_accrual_time)
+        accrual_intensity_arg <- input$ph_s_accrual_rate
+      } else {
+        req(input$ph_s_monthly_enroll)
+        monthly <- as.numeric(trimws(strsplit(input$ph_s_monthly_enroll, ",")[[1]]))
+        validate(need(length(monthly) > 0 && all(!is.na(monthly)) && all(monthly >= 0),
+                      "Monthly enrollment counts must be non-negative numbers."))
+        accrual_time_arg      <- seq(0, length(monthly) - 1)
+        accrual_intensity_arg <- monthly
+      }
+
+      ss_args <- list(
+        design                 = design,
+        allocationRatioPlanned = input$ph_s_alloc,
+        accrualTime            = accrual_time_arg,
+        accrualIntensity       = accrual_intensity_arg,
+        followUpTime           = input$ph_s_followup_time,
+        dropoutRate1           = input$ph_s_dropout1,
+        dropoutRate2           = input$ph_s_dropout2,
+        dropoutTime            = input$ph_s_dropout_time,
+        hazardRatio            = hr_weighted
+      )
+
+      ss <- tryCatch(
+        do.call(rpact::getSampleSizeSurvival, ss_args),
+        error = function(e) {
+          showNotification(paste("rpact error:", e$message), type = "error", duration = 8)
+          NULL
+        }
+      )
+      validate(need(!is.null(ss), "Sample size calculation failed — check inputs."))
+
+      strat_names <- sapply(seq_len(n_strata), function(i) input[[paste0("ph_s_name_", i)]])
+
+      list(design = design, ss = ss, ia_types = ia_types, k = k,
+           hr_weighted = hr_weighted, strat_names = strat_names,
+           rel_props = rel_props, hrs = hrs)
+    })
+
+    # ================================================================
+    # PH Stratified: Summary boxes
+    # ================================================================
+    output$ph_s_summary_boxes <- renderUI({
+      res <- ph_s_result()
+      req(res)
+      ss <- res$ss
+
+      total_n  <- ceiling(max(ss$numberOfSubjects,  na.rm = TRUE))
+      n_arm1   <- ceiling(max(ss$numberOfSubjects1, na.rm = TRUE))
+      n_arm2   <- ceiling(max(ss$numberOfSubjects2, na.rm = TRUE))
+      tot_ev   <- ceiling(max(ss$numberOfEvents,    na.rm = TRUE))
+      duration <- round(max(ss$studyDuration,       na.rm = TRUE), 1)
+
+      fluidRow(
+        column(3, div(class = "info-box bg-blue",
+          div(class = "info-box-icon", icon("users")),
+          div(class = "info-box-content",
+            span(class = "info-box-text",  "Total N"),
+            span(class = "info-box-number", total_n)
+          )
+        )),
+        column(3, div(class = "info-box bg-green",
+          div(class = "info-box-icon", icon("calendar-check")),
+          div(class = "info-box-content",
+            span(class = "info-box-text",  "Required Events"),
+            span(class = "info-box-number", tot_ev)
+          )
+        )),
+        column(3, div(class = "info-box bg-yellow",
+          div(class = "info-box-icon", icon("clock")),
+          div(class = "info-box-content",
+            span(class = "info-box-text",  "Study Duration (mo)"),
+            span(class = "info-box-number", duration)
+          )
+        )),
+        column(3, div(class = "info-box bg-red",
+          div(class = "info-box-icon", icon("vials")),
+          div(class = "info-box-content",
+            span(class = "info-box-text",  "Per Arm (trt / ctrl)"),
+            span(class = "info-box-number", paste0(n_arm1, " / ", n_arm2))
+          )
+        ))
+      )
+    })
+
+    # ================================================================
+    # PH Stratified: Stage details table
+    # ================================================================
+    output$ph_s_stage_table <- DT::renderDataTable({
+      res <- ph_s_result()
+      req(res)
+      ss <- res$ss; k <- res$k
+      df <- data.frame(
+        Stage            = seq_len(k),
+        Info_Fraction    = round(res$design$informationRates, 4),
+        Events_at_Stage  = ceiling(ss$eventsPerStage),
+        Cum_Events       = ceiling(ss$numberOfEvents),
+        N_at_Stage       = ceiling(ss$numberOfSubjects),
+        Analysis_Time_mo = round(ss$analysisTime, 2),
+        stringsAsFactors = FALSE
+      )
+      DT::datatable(df, rownames = FALSE,
+                    options = list(dom = "t", pageLength = 20,
+                                   columnDefs = list(list(className = "dt-center", targets = "_all"))))
+    })
+
+    # ================================================================
+    # PH Stratified: Boundaries (z) table
+    # ================================================================
+    output$ph_s_boundary_table <- DT::renderDataTable({
+      res <- ph_s_result()
+      req(res)
+      design <- res$design; k <- res$k
+      has_futility <- !is.null(design$futilityBounds) && !all(design$futilityBounds <= -5)
+      df <- data.frame(
+        Stage          = seq_len(k),
+        Info_Fraction  = round(design$informationRates, 6),
+        Efficacy_z     = round(design$criticalValues,   6),
+        Nominal_Alpha  = round(design$stageLevels,      6),
+        Cumul_Alpha    = round(design$alphaSpent,        6),
+        stringsAsFactors = FALSE
+      )
+      if (has_futility) df$Futility_z <- c(round(design$futilityBounds, 6), NA)
+      DT::datatable(df, rownames = FALSE,
+                    options = list(dom = "t", pageLength = 20,
+                                   columnDefs = list(list(className = "dt-center", targets = "_all"))))
+    })
+
+    # ================================================================
+    # PH Stratified: Boundaries (HR) table
+    # ================================================================
+    output$ph_s_hr_table <- DT::renderDataTable({
+      res <- ph_s_result()
+      req(res)
+      ss <- res$ss; k <- res$k
+      has_futility <- !is.null(res$design$futilityBounds) && !all(res$design$futilityBounds <= -5)
+      df <- data.frame(
+        Stage        = seq_len(k),
+        Efficacy_HR  = round(ss$criticalValuesEffectScale, 4),
+        Efficacy_p   = signif(ss$criticalValuesPValueScale, 4),
+        stringsAsFactors = FALSE
+      )
+      if (has_futility) df$Futility_HR <- c(round(ss$futilityBoundsEffectScale, 4), NA)
+      DT::datatable(df, rownames = FALSE,
+                    options = list(dom = "t", pageLength = 20,
+                                   columnDefs = list(list(className = "dt-center", targets = "_all"))))
+    })
+
+    # ================================================================
+    # PH Stratified: Boundary plot
+    # ================================================================
+    output$ph_s_boundary_plot <- renderPlot({
+      res <- ph_s_result()
+      req(res)
+      plot(res$design, main = paste0("Boundary Plot (Weighted HR = ",
+                                     round(res$hr_weighted, 4), ")"))
+    })
+
+    # ================================================================
+    # PH Stratified: Design details
+    # ================================================================
+    output$ph_s_design_summary <- renderPrint({
+      res <- ph_s_result()
+      req(res)
+      cat("========== PH Stratified Design ==========\n\n")
+      cat("Strata:\n")
+      for (i in seq_along(res$strat_names)) {
+        cat(sprintf("  %s: enrollment=%.1f%%  HR=%.4f\n",
+                    res$strat_names[i], res$rel_props[i]*100, res$hrs[i]))
+      }
+      cat(sprintf("\nWeighted Average HR: %.6f\n\n", res$hr_weighted))
       cat("========== Group Sequential Design ==========\n\n")
       print(summary(res$design))
       cat("\n\n========== Sample Size / Survival ==========\n\n")
