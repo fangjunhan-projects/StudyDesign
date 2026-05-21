@@ -341,7 +341,88 @@ mod_sample_size_ui <- function(id) {
               )
             )
           )
+        ),
+
+        # ================================================================
+        # Tab 3: NPH — Stratified (gsDesign2)
+        # ================================================================
+        tabPanel(
+          title = tagList(icon("layer-group"), " NPH — Stratified (gsDesign2)"),
+          value = "nph_strat",
+
+          fluidRow(
+            column(
+              width = 4,
+              box(
+                title = "Design Parameters", status = "danger",
+                solidHeader = TRUE, width = NULL,
+
+                h5("Trial Design"),
+                numericInput(ns("nph_s_k"),     "Number of Stages (K)",          value = 1,     min = 1, max = 10),
+                numericInput(ns("nph_s_alpha"),  "One-sided Alpha",               value = 0.025, min = 0.001, max = 0.5, step = 0.005),
+                numericInput(ns("nph_s_beta"),   "Beta (Type II error, 1-power)", value = 0.2,   min = 0.01,  max = 0.5, step = 0.05),
+
+                hr(),
+                h5("Strata"),
+                numericInput(ns("nph_s_n_strata"), "Number of Strata", value = 2, min = 2, max = 6, step = 1),
+                p("Define each stratum's enrollment proportion and hazard model below.",
+                  style = "font-size: 0.85em; color: #888;"),
+                uiOutput(ns("nph_strat_stratum_inputs")),
+
+                hr(),
+                h5("Accrual & Follow-up"),
+                numericInput(ns("nph_s_accrual_time"),  "Accrual Duration (months)",                   value = 24,   min = 1),
+                numericInput(ns("nph_s_accrual_rate"),  "Accrual Rate (patients / month)",             value = 20,   min = 0.1, step = 1),
+                numericInput(ns("nph_s_followup_time"), "Additional Follow-up after Accrual (months)", value = 12,   min = 0),
+                numericInput(ns("nph_s_dropout"),       "Annual Dropout Rate (all strata)",            value = 0.02, min = 0, max = 1, step = 0.01),
+                numericInput(ns("nph_s_alloc"),         "Allocation Ratio (trt : ctrl)",               value = 1,    min = 0.1, step = 0.1),
+
+                hr(),
+                h5("Group Sequential Boundaries"),
+                helpText("For K = 1 (fixed design), boundary inputs are ignored."),
+                conditionalPanel(
+                  condition = sprintf("input['%s'] > 1", ns("nph_s_k")),
+                  textInput(ns("nph_s_analysis_times"), "Analysis Calendar Times (months, comma-separated)",
+                            placeholder = "e.g. 16, 26, 35"),
+                  p("Last value must equal Accrual Duration + Follow-up.",
+                    style = "font-size: 0.85em; color: #888;"),
+                  selectInput(ns("nph_s_alpha_spending"), "Alpha Spending (Efficacy)",
+                              choices = c(
+                                "Lan-DeMets (O'Brien-Fleming)" = "sfLDOF",
+                                "Lan-DeMets (Pocock)"          = "sfLDP",
+                                "Hwang-Shih-DeCani (gamma=-4)" = "sfHSD"
+                              ), selected = "sfLDOF"),
+                  selectInput(ns("nph_s_beta_spending"), "Beta Spending (Futility)",
+                              choices = c(
+                                "None (no futility)" = "none",
+                                "Lan-DeMets (O'Brien-Fleming)" = "sfLDOF",
+                                "Lan-DeMets (Pocock)"          = "sfLDP",
+                                "Hwang-Shih-DeCani (gamma=-4)" = "sfHSD"
+                              ), selected = "none")
+                ),
+
+                hr(),
+                actionButton(ns("nph_s_run"), "Calculate Sample Size",
+                             class = "btn-danger btn-block", icon = icon("calculator"))
+              )
+            ),
+
+            column(
+              width = 8,
+              uiOutput(ns("nph_s_summary_boxes")),
+              box(
+                title = "Detailed Results", status = "success",
+                solidHeader = TRUE, width = NULL,
+                tabsetPanel(
+                  tabPanel("Stage Summary",  DT::dataTableOutput(ns("nph_s_stage_table"))),
+                  tabPanel("Boundaries",     DT::dataTableOutput(ns("nph_s_bound_table"))),
+                  tabPanel("Design Details", verbatimTextOutput(ns("nph_s_design_details")))
+                )
+              )
+            )
+          )
         )
+
       )
     )
   )
@@ -978,6 +1059,248 @@ mod_sample_size_server <- function(id) {
       res <- nph_result()
       req(res)
       cat("========== NPH Design (gsDesign2 :: gs_design_ahr) ==========\n\n")
+      print(res$result)
+    })
+
+    # ================================================================
+    # NPH Stratified: Dynamic per-stratum inputs
+    # ================================================================
+    output$nph_strat_stratum_inputs <- renderUI({
+      n <- input$nph_s_n_strata
+      req(n >= 2)
+
+      lapply(seq_len(n), function(i) {
+        tagList(
+          hr(),
+          h6(paste0("Stratum ", i)),
+          textInput(ns(paste0("nph_s_name_",     i)), "Stratum Name",                    value = paste0("S", i)),
+          numericInput(ns(paste0("nph_s_prop_",  i)), "Enrollment Proportion (%)",        value = round(100 / n, 1), min = 0.1, max = 99.9, step = 0.1),
+          numericInput(ns(paste0("nph_s_ctrl_",  i)), "Median Survival — Control (mo)",   value = 10,   min = 0.1, step = 0.5),
+          numericInput(ns(paste0("nph_s_delay_", i)), "Delay Duration (months)",          value = 6,    min = 0,   step = 1),
+          numericInput(ns(paste0("nph_s_hre_",   i)), "HR during delay",                  value = 1.0,  min = 0.01, step = 0.01),
+          numericInput(ns(paste0("nph_s_hrl_",   i)), "HR after delay (steady-state HR)", value = 0.65, min = 0.01, step = 0.01)
+        )
+      })
+    })
+
+    # ================================================================
+    # NPH Stratified: Main calculation
+    # ================================================================
+    nph_s_result <- eventReactive(input$nph_s_run, {
+
+      n_strata <- input$nph_s_n_strata
+      k        <- input$nph_s_k
+
+      # Collect per-stratum inputs
+      strat_names <- sapply(seq_len(n_strata), function(i) input[[paste0("nph_s_name_", i)]])
+      props       <- sapply(seq_len(n_strata), function(i) input[[paste0("nph_s_prop_", i)]])
+      med_ctrls   <- sapply(seq_len(n_strata), function(i) input[[paste0("nph_s_ctrl_", i)]])
+      delays      <- sapply(seq_len(n_strata), function(i) input[[paste0("nph_s_delay_",i)]])
+      hr_earlys   <- sapply(seq_len(n_strata), function(i) input[[paste0("nph_s_hre_",  i)]])
+      hr_lates    <- sapply(seq_len(n_strata), function(i) input[[paste0("nph_s_hrl_",  i)]])
+
+      validate(
+        need(all(!is.na(props)) && sum(props) > 0, "Enrollment proportions must be positive numbers."),
+        need(all(med_ctrls > 0), "Median survival must be positive for all strata.")
+      )
+
+      rel_props <- props / sum(props)   # normalise to sum to 1
+
+      total_time <- input$nph_s_accrual_time + input$nph_s_followup_time
+      dropout_mo <- input$nph_s_dropout / 12
+
+      # Build enroll_rate across strata
+      enroll_rate <- gsDesign2::define_enroll_rate(
+        duration = rep(input$nph_s_accrual_time, n_strata),
+        rate     = rel_props,
+        stratum  = strat_names
+      )
+
+      # Build fail_rate across strata (delayed treatment effect per stratum)
+      durations_all    <- c()
+      fail_rates_all   <- c()
+      hrs_all          <- c()
+      dropout_all      <- c()
+      strata_all       <- c()
+
+      for (i in seq_len(n_strata)) {
+        ctrl_lambda_i <- log(2) / med_ctrls[i]
+        durations_all  <- c(durations_all,  delays[i], Inf)
+        fail_rates_all <- c(fail_rates_all, ctrl_lambda_i, ctrl_lambda_i)
+        hrs_all        <- c(hrs_all,        hr_earlys[i],  hr_lates[i])
+        dropout_all    <- c(dropout_all,    dropout_mo,    dropout_mo)
+        strata_all     <- c(strata_all,     strat_names[i], strat_names[i])
+      }
+
+      fail_rate <- gsDesign2::define_fail_rate(
+        duration     = durations_all,
+        fail_rate    = fail_rates_all,
+        hr           = hrs_all,
+        dropout_rate = dropout_all,
+        stratum      = strata_all
+      )
+
+      # Spending functions
+      sf_lookup <- list(
+        sfLDOF = list(sf = gsDesign::sfLDOF,    param = NULL),
+        sfLDP  = list(sf = gsDesign::sfLDPocock, param = NULL),
+        sfHSD  = list(sf = gsDesign::sfHSD,      param = -4)
+      )
+
+      if (k == 1) {
+        nph_s_analysis_time <- total_time
+        upper_fn  <- gsDesign2::gs_b
+        upper_par <- stats::qnorm(1 - input$nph_s_alpha)
+        lower_fn  <- gsDesign2::gs_b
+        lower_par <- -Inf
+      } else {
+        req(input$nph_s_analysis_times)
+        nph_s_analysis_time <- as.numeric(trimws(strsplit(input$nph_s_analysis_times, ",")[[1]]))
+        validate(
+          need(length(nph_s_analysis_time) == k,        "Number of analysis times must equal K."),
+          need(all(!is.na(nph_s_analysis_time)),         "All analysis times must be numeric."),
+          need(all(diff(nph_s_analysis_time) > 0),       "Analysis times must be strictly increasing."),
+          need(abs(nph_s_analysis_time[k] - total_time) < 0.01,
+               sprintf("Last analysis time must equal total study duration (%.1f months).", total_time))
+        )
+
+        su <- sf_lookup[[input$nph_s_alpha_spending]]
+        upper_fn  <- gsDesign2::gs_spending_bound
+        upper_par <- list(sf = su$sf, total_spend = input$nph_s_alpha, param = su$param)
+
+        if (input$nph_s_beta_spending == "none") {
+          lower_fn  <- gsDesign2::gs_b
+          lower_par <- -Inf
+        } else {
+          sl <- sf_lookup[[input$nph_s_beta_spending]]
+          lower_fn  <- gsDesign2::gs_spending_bound
+          lower_par <- list(sf = sl$sf, total_spend = input$nph_s_beta, param = sl$param)
+        }
+      }
+
+      result <- tryCatch(
+        gsDesign2::gs_design_ahr(
+          enroll_rate   = enroll_rate,
+          fail_rate     = fail_rate,
+          ratio         = input$nph_s_alloc,
+          alpha         = input$nph_s_alpha,
+          beta          = input$nph_s_beta,
+          analysis_time = nph_s_analysis_time,
+          info_scale    = "h0_h1_info",
+          upper         = upper_fn,
+          upar          = upper_par,
+          lower         = lower_fn,
+          lpar          = lower_par
+        ),
+        error = function(e) {
+          showNotification(paste("gsDesign2 error:", e$message), type = "error", duration = 10)
+          NULL
+        }
+      )
+      validate(need(!is.null(result), "Calculation failed — check inputs."))
+
+      list(result = result, k = k, total_time = total_time,
+           strat_names = strat_names, rel_props = rel_props)
+    })
+
+    # ================================================================
+    # NPH Stratified: Summary boxes
+    # ================================================================
+    output$nph_s_summary_boxes <- renderUI({
+      res <- nph_s_result()
+      req(res)
+      an <- res$result$analysis
+
+      total_n  <- ceiling(max(an$n,     na.rm = TRUE))
+      tot_ev   <- ceiling(max(an$event, na.rm = TRUE))
+      duration <- round(max(an$time,    na.rm = TRUE), 1)
+      ratio    <- input$nph_s_alloc
+      n_trt    <- ceiling(total_n * ratio / (1 + ratio))
+      n_ctrl   <- total_n - n_trt
+
+      fluidRow(
+        column(3, div(class = "info-box bg-blue",
+          div(class = "info-box-icon", icon("users")),
+          div(class = "info-box-content",
+            span(class = "info-box-text",  "Total N"),
+            span(class = "info-box-number", total_n)
+          )
+        )),
+        column(3, div(class = "info-box bg-green",
+          div(class = "info-box-icon", icon("calendar-check")),
+          div(class = "info-box-content",
+            span(class = "info-box-text",  "Required Events"),
+            span(class = "info-box-number", tot_ev)
+          )
+        )),
+        column(3, div(class = "info-box bg-yellow",
+          div(class = "info-box-icon", icon("clock")),
+          div(class = "info-box-content",
+            span(class = "info-box-text",  "Study Duration (mo)"),
+            span(class = "info-box-number", duration)
+          )
+        )),
+        column(3, div(class = "info-box bg-red",
+          div(class = "info-box-icon", icon("vials")),
+          div(class = "info-box-content",
+            span(class = "info-box-text",  "Per Arm (trt / ctrl)"),
+            span(class = "info-box-number", paste0(n_trt, " / ", n_ctrl))
+          )
+        ))
+      )
+    })
+
+    # ================================================================
+    # NPH Stratified: Stage summary table
+    # ================================================================
+    output$nph_s_stage_table <- DT::renderDataTable({
+      res <- nph_s_result()
+      req(res)
+      an <- res$result$analysis
+
+      df <- data.frame(
+        Stage         = an$analysis,
+        Analysis_Time = round(an$time,      2),
+        N             = ceiling(an$n),
+        Events        = ceiling(an$event),
+        AHR           = round(an$ahr,       4),
+        Info_Frac     = round(an$info_frac, 4),
+        stringsAsFactors = FALSE
+      )
+
+      DT::datatable(df, rownames = FALSE,
+                    options = list(dom = "t", pageLength = 20,
+                                   columnDefs = list(list(className = "dt-center", targets = "_all"))))
+    })
+
+    # ================================================================
+    # NPH Stratified: Boundaries table
+    # ================================================================
+    output$nph_s_bound_table <- DT::renderDataTable({
+      res <- nph_s_result()
+      req(res)
+      bd <- res$result$bound
+
+      keep_cols <- intersect(names(bd), c("analysis", "bound", "z", "probability", "~hr at bound"))
+      df <- as.data.frame(bd[, keep_cols, drop = FALSE])
+      numeric_cols <- sapply(df, is.numeric)
+      df[numeric_cols] <- lapply(df[numeric_cols], round, digits = 6)
+
+      DT::datatable(df, rownames = FALSE,
+                    options = list(dom = "t", pageLength = 20,
+                                   columnDefs = list(list(className = "dt-center", targets = "_all"))))
+    })
+
+    # ================================================================
+    # NPH Stratified: Design details
+    # ================================================================
+    output$nph_s_design_details <- renderPrint({
+      res <- nph_s_result()
+      req(res)
+      cat("========== NPH Stratified Design (gsDesign2 :: gs_design_ahr) ==========\n\n")
+      cat("Strata:", paste(res$strat_names, collapse = ", "), "\n")
+      cat("Relative enrollment proportions:",
+          paste(round(res$rel_props * 100, 1), collapse = "%, "), "%\n\n")
       print(res$result)
     })
 
