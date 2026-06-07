@@ -1,0 +1,420 @@
+---
+title: "Comparison of various implementations of group sequential design with interim analysis"
+author: "Binbing Yu"
+date: "`r Sys.Date()`"
+output: 
+  rmarkdown::html_document:
+    toc: true
+    keep_md: false
+    embed_resources: false
+    toc_float: true
+    theme: yeti
+    code_folding: show
+    fig_width: 10
+    fig_height: 10
+editor_options: 
+  chunk_output_type: console
+pkgdown:
+  as_is: false
+---
+
+```{r packages, echo=FALSE, message=FALSE, warning=FALSE}
+rm(list=ls())
+library(gsDesign)
+library(gsDesign2)
+library(survival)
+library(rpact)
+library(kableExtra)
+library(tibble)
+```
+
+This file compares the implementation of various group sequential design software tools with interim analysis
+
+- AZ futility anlaysis R Shiny tool (https://rstudio-connect.seml.scp.astrazeneca.net/futility/)
+
+- EAST (https://cytel.com/east-horizon/)
+
+- R gsDesign and gsDesign2 packages (https://merck.github.io/gsDesign2/)
+
+- rpact (https://www.rpact.org/)
+
+# 1. Case 1 with only futility assessment at interim 
+
+The hypotheses and assumptions, trial design and operational parameters are below. All parameters take the default values in the AZ futility shiny tool except that the time from DCO to futility decision is 0 months instead of 2 months.
+```{r, warning=FALSE, message=FALSE, echo=TRUE}
+control.median <- 12
+HR1 <- 0.65
+dropout.rate <- -log(0.999)/12   # 0.1% per 12 month
+randomization.ratio<-1
+alpha <- 0.025
+power <- 0.9
+N <- 500
+accrual.period <- 18
+k<-1.5
+time.DCO.futility<-0
+IA.IF <-0.35
+Stopping.Metric.List<-c("Hazard Ratio", "IA Z-statistic", "Predictive Probability", "Conditional Power")
+Stopping.Boundary.List<-c(0.3, 0.2, 1, 0.7)
+```
+
+## 1.1. AZ futility Shiny tool output
+![](Case1AZShiny.png)
+
+## 1.2. gsDesign/2 implementation
+
+**Input summary** (which does not depend on accrual schedule and baseline hazard rate)
+
+```{r, warning=FALSE, message=FALSE}
+n<-nEvents(hr = HR1, alpha = alpha, beta = 1-power, ratio = randomization.ratio, tbl = TRUE)$n
+p.treat <- randomization.ratio / (1 + randomization.ratio)
+SE.logHR<-sqrt(1/(n*p.treat*(1-p.treat)))
+critical.HR<-exp(-qnorm(1-alpha)*SE.logHR)
+```
+The number of events n=`r n` and the critical.HR=`r critical.HR`.
+
+**Rules**
+
+The formula corresponding to equivalent futility stopping rules in various metrics are shown in Page 7 of Futility User Guide. Let $\theta^*$ be the threshold in HR for futility stopping if $\hat HR_{IA}>\theta^*$, the threshold for the other three metrics are formulated as follows:
+
+\begin{eqnarray}
+\mbox{Z-statistics } Z^*&=&-\log(\theta^*)\sqrt{n_{IA}\cdot p_T(1-p_T)}\nonumber\\
+\mbox{Predictive probability } PP^*&=&\Phi\left(\left[-\log(\theta^*)\sqrt{n\cdot p_T(1-p_T)}-z_{1-\alpha}\right]\sqrt{\frac{I_{IA}}{1-I_{IA}}}\right)\nonumber\\
+\mbox{Conditional power } CP^*&=&\Phi\left(\left[-\log(\theta^*)\sqrt{n\cdot p_T(1-p_T)}-z_{1-\alpha}\right]\sqrt{\frac{1}{1-I_{IA}}}\right)\nonumber
+\end{eqnarray}
+where $n_{IA}$ is the number of events at IA, $p_T=r/(1+r)$ is the proportion of patients in the treatment arm for $r:1$ randomization, $I_{IA}$ is the information fraction at IA.
+
+Given $(n, r, I_{IA}, \alpha)$, where $n$ is total number of events at final analysis, $r:1$ is the randomization ratio of treatment versus control, IA.IF is the information fraction at interim analysis and $\alpha$ is the one-sided alpha level, the threshold values for anyone of the four metrics, i.e, conditional power (CP), predictive power (PP), hazard ratio (HR) and Z-statistics can be converted into other three using the function `convert.futility.stopping.metrics(metric, threshold, n, r, IA.IF, alpha)`. As of now, I cannot find a good implementation of `gsCP` and `gsPP` functions in `R gsDesign`.
+
+```{r, warning=FALSE, message=FALSE}
+metric.list<-c("HR","Z","PP","CP")
+n.IA<-n*IA.IF
+
+convert.futility.stopping.metrics<-function(metric, threshold, n, r, IA.IF, alpha) {
+  n.IA<-n*IA.IF
+  p.treat<-r/(1+r)
+  if (metric=="HR") {
+    HR <- threshold  
+    Z.IA <- -log(HR)*sqrt(n.IA*p.treat*(1-p.treat))
+    Z.FA <- -log(HR)*sqrt(n*p.treat*(1-p.treat))
+    PP <- pnorm((Z.FA-qnorm(1-alpha))*sqrt(IA.IF/(1-IA.IF)))
+    CP <- pnorm((Z.FA-qnorm(1-alpha))*sqrt(1/(1-IA.IF)))
+  } 
+  if (metric=="Z") {
+    Z.IA <- threshold
+    HR <- exp(-Z.IA/sqrt(n.IA*p.treat*(1-p.treat)))
+    Z.FA <- -log(HR)*sqrt(n*p.treat*(1-p.treat))
+    PP <- pnorm((Z.FA-qnorm(1-alpha))*sqrt(IA.IF/(1-IA.IF)))
+    CP <- pnorm((Z.FA-qnorm(1-alpha))*sqrt(1/(1-IA.IF)))
+  }
+  if (metric=="PP") {
+    PP<-threshold
+    Z.FA <- qnorm(PP)/sqrt(IA.IF/(1-IA.IF))+qnorm(1-alpha)
+    Z.IA <- Z.FA*sqrt(IA.IF)
+    HR <- exp(-Z.IA/sqrt(n.IA*p.treat*(1-p.treat)))
+    CP <- pnorm((Z.FA-qnorm(1-alpha))*sqrt(1/(1-IA.IF)))
+  }
+  if (metric=="CP") {
+    CP<-threshold    
+    Z.FA <- qnorm(CP)*sqrt(1-IA.IF)+qnorm(1-alpha)
+    Z.IA <- Z.FA*sqrt(IA.IF)
+    HR <- exp(-Z.IA/sqrt(n.IA*p.treat*(1-p.treat)))
+    PP <- pnorm((Z.FA-qnorm(1-alpha))*sqrt(IA.IF/(1-IA.IF)))
+  }
+  return (c(HR,Z.IA,PP,CP))
+}
+
+futility.threshold<-convert.futility.stopping.metrics(metric="HR",threshold=0.847, n=n,r=1, IA.IF=IA.IF,alpha=alpha)
+#convert.futility.stopping.metrics(metric="Z", threshold=0.737, n=n,r=1, IA.IF=IA.IF,alpha=alpha)
+convert.futility.stopping.metrics(metric="PP",threshold=0.30,  n=n,r=1, IA.IF=IA.IF,alpha=alpha)
+#convert.futility.stopping.metrics(metric="CP",threshold=0.20,  n=n,r=1, IA.IF=IA.IF,alpha=alpha)
+kable(round(t(futility.threshold),3))%>%add_header_above(c("HR"=1,"Z-statistic"=1,"PP"=1,"CP"=1))%>%column_spec(1:4, width = "3cm") 
+```
+
+**DRC Template** 
+
+(A) Calculate the times for IA and FA based on target # of events (n) as shown in Rows 2 and 4 in AZ R Shiny tool. The time to reach a certain number of events depends on the enrollment (accrual) schedule, failure/event rates for the two treatment arms and dropout rate. In `gsDesign2`, the users need to define `enroll_rate` and `fail_rate`.
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE}
+HR.list<-c(1, critical.HR, HR1)
+# Note that with rounding, the sum of monthly.accural may not equal N
+cumulative.accrual<- (1:accrual.period/accrual.period)^k*N  
+monthly.accrual <- round(diff(c(0,cumulative.accrual)))
+enroll_rate <- tibble(stratum = "All", duration = rep(1,accrual.period), rate = monthly.accrual)
+event.list<-c(IA.IF, 1)*n  
+time.from.expected.event<-matrix(NA,nrow=length(event.list),ncol=length(HR.list))
+row.names(time.from.expected.event)<-c("IA","FA")
+colnames(time.from.expected.event)<-paste("HR =",round(HR.list,3))
+
+get.time.from.expected.event<-function(HR, event.list) {  
+  fail_rate <- tibble(stratum = "All",  duration = Inf, fail_rate = log(2) / control.median, hr = HR, dropout_rate=dropout.rate)
+  time.list<-rep(NA,length(event.list))
+  
+  for (i in 1:length(event.list)) {
+    time.list[i]<-expected_time(
+      enroll_rate = enroll_rate,
+      fail_rate = fail_rate,
+      target_event = event.list[i]
+    )[1,1]
+  }
+  time.list
+}
+
+for (iH in 1:3) time.from.expected.event[,iH]<-get.time.from.expected.event(HR.list[iH],event.list)
+kable(round(time.from.expected.event,1))%>%kable_styling()
+```
+
+(B) Power with futility and Probability of futility stop 
+
+**Note:** The futility bound in R gsDesign2 uses the metric of Z-statistic.
+
+```{r, warning=FALSE, message=FALSE}
+fail_rate <- tibble(stratum = "All",  duration = Inf, fail_rate = log(2) / control.median, hr = HR1, dropout_rate=dropout.rate)
+  
+case1.gsd2<-gsDesign2::gs_power_ahr(
+  enroll_rate = enroll_rate,
+  fail_rate = fail_rate,
+  ratio = randomization.ratio,
+  event = c(IA.IF,1)*n,
+  binding = FALSE, 
+  upper = gs_spending_bound, 
+  upar = list(sf = gsDesign::sfLDOF, total_spend = 0.025),
+  test_upper = c(FALSE, TRUE),
+  test_lower = c(TRUE, FALSE), 
+  lower = gs_b, 
+  lpar = c(hrn2z(hr = 1/0.847, n = 80, ratio = 1),  -Inf),
+  info_scale = "h0_h1_info"
+)
+
+#kable(case1.gsd2$analysis)%>%kable_styling()
+case1.gsd2 |>  summary() |>  as_gt()
+```
+
+## 1.3.  rpact implementation
+
+For a fixed sample design, 227 events are required to achieve 0.9 power 
+
+```{r, warning=FALSE, message=FALSE}
+
+getDesignGroupSequential(typeOfDesign = "noEarlyEfficacy",
+        sided = 1,
+        alpha = 0.025,
+        beta = 0.1,
+        informationRates = c(IA.IF, 1), 
+        bindingFutility = FALSE,
+        futilityBounds = 0.737) |>
+    getPowerSurvival(directionUpper = FALSE, 
+        median2 = 12,
+        hazardRatio = HR1, 
+        maxNumberOfEvents = n, 
+        accrualTime = c(0:accrual.period),
+        accrualIntensity = monthly.accrual, 
+        dropoutRate1 = 0.05,
+        dropoutRate2 = 0.05,
+        dropoutTime = 12) |>
+    summary() 
+
+```
+
+# 2. Case 2 - SOUNDTRACK study design
+
+The statistical design assumptions are below:
+
+- One-sided alpha 0.025
+- Sample size 1200 with 1:1 randomization ratio (control vs treatment) and enrollment duration is 24 months 
+- Monthly enrollment count/cumulative enrollment percentage: 
+- Annual (12 month) dropout rate 5%
+- Median survival for the control 54.01717 months, which is equivalent to 1 month survival probability 0.98725
+- Hazard ratio of treatment vs. control 0.415
+- Three interim analyses (IA) when there are 70, 239, 281 events (information fraction 0.249, 0.851 and 1)
+
+       - IA1: Non-binding futility analysis at 70 events with futility bound (HR>0.916)
+       - IA2 and IA3: efficacy assessment with O'Brien-Fleming spending function
+
+```{r assumption, warning=FALSE, message=FALSE}
+rm(list=ls())
+alpha <-0.025
+N<-1200
+rate <- c(3, 6,	10,	16,	23,	33,	42,	50,	55,	59,	62,	63,	64,	64,	65,	65,	65,	65,	65,	65,	65,	65,	65,	65)
+drop.prob<- 0.05
+HR1 <- 0.415
+mEP.ctrl.m <- 54.01717 
+IF<-c(0.249,0.851,1)
+n<-281
+event.list<-IF*n
+
+enroll_rate <- define_enroll_rate(duration = c(rep(1,24)), rate=rate)
+# The piecewise HR may be used later 
+fail_rate <- define_fail_rate(
+  duration = Inf,
+  fail_rate = log(2) / mEP.ctrl.m,
+  hr = HR1,
+  dropout_rate = -log(1-drop.prob)/12
+)
+```
+
+## 2.1. EAST results
+
+![](EAST_PFS_Base.png)
+
+The futility boundary of hazard ratio based on $\beta$-spending function is 0.916
+
+## 2.2. gsDesign2 output
+
+**Note:** The HR futility threshold value in gs_power_ahr function is the reciprocal of the HR threshold (`HR.fut=0.916`) in EAST .
+```{r, warning=FALSE, message=FALSE}
+HR.fut <- 0.916
+Z.fut<-hrn2z(hr = 1/HR.fut, n = event.list[1], ratio = 1)
+```
+The z-statistic threshold is `r round(Z.fut,3)`.
+
+```{r, warning=FALSE, message=FALSE}
+case2.gsd2<-gs_power_ahr(
+  enroll_rate = enroll_rate,
+  fail_rate = fail_rate,
+  ratio = 1,
+  event = event.list,
+  binding = FALSE, 
+  upper = gs_spending_bound, 
+  upar = list(sf = gsDesign::sfLDOF, total_spend = alpha),
+  info_scale = "h0_h1_info",
+  test_upper = c(FALSE, TRUE, TRUE),  # Only test efficacy possible after 1st analysis
+  test_lower = c(TRUE, FALSE, FALSE), # Only test futility possible on 1st analysis
+  lower = gs_b, 
+  lpar = c(Z.fut, -Inf, -Inf)
+)
+
+#kable(case2.gsd2$analysis, digits=3) %>% kable_styling() %>% column_spec(column=c(2,4),background="yellow")
+case2.gsd2 |>  summary() |>  as_gt()
+```
+
+
+<!-- ```{r, warning=FALSE, message=FALSE, echo=FALSE, results=FALSE} -->
+<!-- # Time to reach required number of events under alternative H1  -->
+<!-- time.list<-rep(NA,length(event.list)) -->
+<!-- for (i in 1:length(event.list)) { -->
+<!--   time.list[i]<-expected_time( -->
+<!--     enroll_rate = enroll_rate, -->
+<!--     fail_rate = fail_rate, -->
+<!--     target_event = event.list[i] -->
+<!--   )[1,1] -->
+<!-- } -->
+<!-- event.time.list<-cbind(event.list, round(time.list,1)) -->
+<!-- colnames(event.time.list)<-NULL -->
+<!-- kable(event.time.list)%>%add_header_above(c("# of events"=1,"Expected time under H1"=1)) -->
+
+
+## 2.3. rpact output
+
+```{r, warning=FALSE, message=FALSE}
+getDesignGroupSequential(informationRates = IF,
+        futilityBounds = c(Z.fut, -6)) |>
+    getPowerSurvival(
+        directionUpper = FALSE, 
+        pi2 = 0.5,
+        hazardRatio = HR1, 
+        maxNumberOfEvents = n,
+        eventTime = mEP.ctrl.m, 
+        accrualTime = c(0:length(rate)),
+        accrualIntensity = rate,
+        dropoutRate1 = 0.05, 
+        dropoutRate2 = 0.05,
+        dropoutTime = 12) |>
+    summary() 
+```    
+
+# 3. Case 3 - AZD0120 study design with non-proportional hazards 
+
+The control median is 15.8 month. The hazard ratio (HR) of treatment vs. control is 4/3 before 2 months and 0.4 after 2 months so that the PFS cross-over time is about 3 months. The design is to find out the sample size (number of patients) based on the target power, survival assumption and enrollment schedule.
+
+```{r, warning=FALSE, message=FALSE}
+times<-0:36
+control.median<-15.8
+control.PFS<-1-pexp(times,rate=log(2)/control.median)
+sexp.delay<-function(time, rate, tau, HR) {
+  (1-pexp(time,rate=rate))*(time<=tau)+(1-pexp(tau,rate=rate))^(1-HR)*(1-pexp(time,rate=rate))^(HR)*(time>tau)
+}
+treatment.PFS<-sexp.delay(times,log(2)/(control.median/(4/3)),2,0.3)
+plot(times,control.PFS,type="l",ylim=c(0,1),xlab="Time (month)",ylab="PFS Probability",lwd=2,xaxt="n")
+lines(times,treatment.PFS,type="l",col="blue",pch=16,lwd=2)
+axis(1,at=3*(0:12))
+abline(h=0.5,lty=4)
+abline(v=3,lty=4)
+legend("bottomleft",col=c("black","blue"),lwd=2,lty=1,bty="n", legend=c("Control","Treatment (Average HR=0.52)"))
+text(x=21,y=0.45,"Design Control Median PFS=15.8m")
+text(x=3,y=0.8,"PFS crossover 3m")
+```
+
+## 3.1. gsDesign2 results
+
+```{r, warning=FALSE, message=FALSE}
+alpha<-0.025
+beta<-0.1  # 1-power
+monthly.enrollment<-c(1, 3, 4, 6, 8, 11, 14, 17, 21, 22, 25, rep(28, 5))
+cumulative.enrollment<-cumsum(monthly.enrollment)
+enrollment.duration<-length(monthly.enrollment) 
+lag.time <- 2 
+HR1<-c(4/3,0.4)
+drop.prob<-0.05
+analysis.time<-c(18,24,30)
+futility.null.prob<-0.36
+Z.fut<-qnorm(futility.null.prob)
+N<-cumulative.enrollment[enrollment.duration]
+  
+enroll_rate <- define_enroll_rate(
+    duration = rep(1,enrollment.duration),
+    rate=monthly.enrollment
+)
+  
+PFS_fail_rate <- define_fail_rate(
+    duration = c(lag.time, Inf),
+    fail_rate = log(2) / control.median,
+    hr = HR1,
+    dropout_rate = -log(1-drop.prob)/12           # 5% dropout in 1 year (12m)
+  )
+  
+case3.gsd2 <- gs_design_ahr(
+    alpha = alpha,
+    beta = beta,
+    enroll_rate = enroll_rate,
+    fail_rate = PFS_fail_rate,
+    analysis_time = analysis.time,
+    upper = gs_spending_bound, # Spending function bound for efficacy
+    upar = list(sf = gsDesign::sfLDOF, total_spend = alpha), 
+    test_upper = c(FALSE,TRUE,TRUE),
+    lower = gs_b,
+    lpar = c(Z.fut, -Inf,-Inf), # futility bound at IA1
+    info_scale = "h0_h1_info"
+  )
+ case3.gsd2 |>  summary() |>  as_gt()
+```
+
+## 3.2. rpact results
+
+```{r, warning=FALSE, message=FALSE}
+event.list<-ceiling(case3.gsd2$analysis$event)
+IF<-event.list/event.list[3]
+
+case3.rpact<-getDesignGroupSequential(informationRates = IF,
+        typeOfDesign = "asOF", 
+        sided = 1, 
+        alpha = alpha,          
+        futilityBounds = c(Z.fut, -6)) 
+
+getSimulationSurvival(case3.rpact,
+        piecewiseSurvivalTime = c(0, lag.time),
+        lambda2 = log(2)/control.median*c(1,1), # haz rate in control
+        lambda1 = log(2)/control.median*c(4/3,0.4), # haz rate in treatment
+        dropoutRate1 = drop.prob, 
+        dropoutRate2 = drop.prob, 
+        dropoutTime = 12,
+        accrualTime = c(0, 1:enrollment.duration),
+        accrualIntensity = monthly.enrollment,
+        #accrualIntensityType = "relative",
+        plannedEvents = event.list,
+        directionUpper = FALSE,
+        maxNumberOfSubjects = sum(monthly.enrollment),
+        maxNumberOfIterations = 20000,
+        maxNumberOfRawDatasetsPerStage = 1,
+        seed = 1234
+)
+```
