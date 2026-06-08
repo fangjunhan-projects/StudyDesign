@@ -8,8 +8,8 @@ ui <- dashboardPage(
       id = "sidebar_menu",
       menuItem("Home", tabName = "home", icon = icon("home")),
       menuItem("M1: Study Design Calculation", icon = icon("calculator"),
-        menuSubItem("IA Boundary",  tabName = "ia_boundary"),
-        menuSubItem("Sample Size",  tabName = "sample_size")
+        menuSubItem("Sample Size", tabName = "sample_size"),
+        menuSubItem("Futility IA", tabName = "futility")
       )
     )
   ),
@@ -35,14 +35,15 @@ ui <- dashboardPage(
             h4("Automated validation of efficacy results"),
             p("Select a module from the sidebar to begin:"),
             tags$ul(
-              tags$li(strong("M1: Study Design Calculation"), " -- IA boundary re-calculation and sample size (PH via rpact, NPH via gsDesign2)")
+              tags$li(strong("Sample Size"), " -- Sample size calculation for survival endpoints (PH via rpact, NPH via gsDesign2)"),
+              tags$li(strong("Futility IA"), " -- Futility interim analysis design (predictive probability, conditional power, HR, Z-statistic)")
             )
           )
         )
       ),
 
-      tabItem(tabName = "ia_boundary",      mod_ia_boundary_ui("ia_boundary")),
-      tabItem(tabName = "sample_size",      mod_sample_size_ui("sample_size"))
+      tabItem(tabName = "sample_size", mod_sample_size_ui("sample_size")),
+      tabItem(tabName = "futility",    mod_futility_ui("futility"))
     )
   )
 )
